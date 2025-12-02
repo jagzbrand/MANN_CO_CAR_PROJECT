@@ -1,12 +1,5 @@
 
-//*************************************************************************
-/*
- keyestudio 4wd BT Car
- lesson 11
- Tracking Car
- http://www.keyestudio.com
-*/ 
-//Data from the smile pattern obtained from the touch tool
+
 unsigned char start01[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 #define SDA_Pin  A4  //Set data pin to A4
 #define SCL_Pin  A5  //Set the clock pin to A5
