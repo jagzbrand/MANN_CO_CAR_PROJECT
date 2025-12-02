@@ -3,6 +3,7 @@
 #include <Adafruit_SSD1306.h>
 #include <Servo.h>
 #include <SoftwareSerial.h>
+#include "LineTracker.h"
 
 #include "Motors.h"
 #include "Sensors.h"
@@ -27,6 +28,10 @@ static const uint8_t kNumColorSensors = 4;
 static const uint8_t kSensorPins[kNumColorSensors] = {A0, A2, A3, A1};
 static const bool ACTIVE_LOW  = true;
 static const bool USE_PULLUPS = true;
+static const uint8_t LTpins[4] = {A0, A2, A3, A1};
+
+LineTracker lt(LTpins, true, true);  // activeLow=true, pullups=true
+
 
 static void initColorSensorPins() {
   for (uint8_t i = 0; i < kNumColorSensors; i++) {
@@ -161,6 +166,8 @@ static void handleBluetooth(int dist, float linePos) {
 void setup() {
   Serial.begin(9600);
   BT.begin(9600);
+  lt.begin();
+
 
   // Motors
   pinMode(ENA, OUTPUT); pinMode(ENB, OUTPUT);
@@ -180,8 +187,8 @@ void setup() {
   headServo.attach(SERVO_PIN);
   headServo.write(90);
 
-  // Line sensors
-  initColorSensorPins();
+ 
+  
 
   // OLED
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) for(;;){}
@@ -215,9 +222,9 @@ void loop() {
 
   // Sensors
   int distance_cm = readDistanceCM();
-  uint8_t lineBits = readColorBits();
-  float linePos = computeLinePosition(lineBits, gLastLinePos);
-  gLastLinePos = linePos;
+  float linePos = lt.computePosition();
+  uint8_t lineBits = lt.readBits();
+
 
   // Bluetooth input and command handling
   static bool movingF = false, movingB = false;
