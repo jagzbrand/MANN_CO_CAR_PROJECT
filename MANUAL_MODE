@@ -1,1 +1,256 @@
+/*
+  PROYECTO MANN CO - MÓDULO DE CONTROL MANUAL (VERSIÓN 2.0)
+  MANN CO PROJECT - MANUAL CONTROL MODULE (VERSION 2.0)
+  
+  Hardware: ATmega328P Xplained / Arduino Uno
+  Driver: L298N
+  Comms: Bluetooth (HC-05/06) & Serial USB
+  
+  LOGICA DE CONTROL / CONTROL LOGIC:
+  - Joystick/Cruceta: El movimiento es continuo mientras dura el estado.
+    Joystick/D-pad: Movement is continuous while the state lasts.
+  - "S" o soltar botón (en futura app) detiene el coche.
+    "S" or releasing the button (in future app) stops the car.
+  - Comandos Terminal: "fw", "bw", "l", "r", "s", "v150".
+    Terminal Commands: "fw", "bw", "l", "r", "s", "v150".
+*/
 
+#include <SoftwareSerial.h>
+
+// ---------------- CONFIGURACIÓN DE PINES / PIN CONFIGURATION ----------------
+
+// --- BLUETOOTH (HC-05/06) ---
+SoftwareSerial BT(9, 10); // RX=9, TX=10
+
+// --- MOTORES (L298N) / MOTORS (L298N) ---
+const int ENA = 5;  // PWM Motor Izquierda / Left Motor PWM
+const int IN1 = 7;
+const int IN2 = 8;
+
+const int ENB = 6;  // PWM Motor Derecha / Right Motor PWM
+const int IN3 = 11;
+const int IN4 = 12;
+
+// ---------------- VARIABLES DE ESTADO / STATE VARIABLES ----------------
+
+// Banderas de estado (NO son toggles, indican el estado actual)
+// State flags (NOT toggles, they indicate current state)
+bool isMovingForward = false; 
+bool isMovingBackward = false; 
+bool isTurningLeft = false; 
+bool isTurningRight = false;
+
+// Velocidad / Speed (0-255)
+int motorSpeed = 160; // Velocidad inicial segura / Safe initial speed
+
+// Buffer para comandos desde el Terminal Serial
+// Buffer for commands from Serial Terminal
+String serialBuffer = "";
+
+// ---------------- SETUP ----------------
+void setup() {
+  Serial.begin(9600); // Monitor Serial USB / USB Serial Monitor
+  BT.begin(9600);     // Módulo Bluetooth / Bluetooth Module
+
+  // Configurar Pines / Configure Pins
+  pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(ENB, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+
+  // 1. REGLA DE ORO: El coche inicia PARADO
+  // 1. GOLDEN RULE: The car starts STOPPED
+  forceStop();
+
+  Serial.println(F("--- MODO MANUAL ACTIVO / MANUAL MODE ACTIVE ---"));
+  Serial.println(F("Comandos Terminal / Terminal Commands: fw, bw, l, r, s, v[0-255]"));
+  Serial.println(F("Ejemplo velocidad / Speed Example: v200"));
+}
+
+// ---------------- LOOP PRINCIPAL / MAIN LOOP ----------------
+void loop() {
+  // 1. Leer comandos desde el Monitor Serial (PC)
+  // 1. Read commands from Serial Monitor (PC)
+  readSerialCommand();
+  
+  // 2. Leer comandos desde Bluetooth (App)
+  // 2. Read commands from Bluetooth (App)
+  readBluetoothCommand();
+  
+  // 3. Ejecutar movimiento basado en el estado actual
+  // 3. Execute movement based on current state
+  executeMovement();
+}
+
+// ---------------- LÓGICA DE ENTRADA (INPUT) / INPUT LOGIC ----------------
+
+void readSerialCommand() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') { // Fin de comando / End of command
+      if (serialBuffer.length() > 0) {
+        processCommand(serialBuffer);
+        serialBuffer = ""; // Limpiar buffer / Clear buffer
+      }
+    } else {
+      serialBuffer += c;
+    }
+  }
+}
+
+void readBluetoothCommand() {
+  while (BT.available()) {
+    char c = (char)BT.read();
+    // Las Apps suelen mandar caracteres sueltos ('F', 'S'), no strings completos
+    // Apps usually send single characters ('F', 'S'), not full strings
+    
+    // Convertimos char a String para usar la misma logica unificada
+    // Convert char to String to use the same unified logic
+    processCommand(String(c));
+  }
+}
+
+// ---------------- PROCESADOR DE COMANDOS / COMMAND PROCESSOR ----------------
+
+void processCommand(String cmd) {
+  cmd.trim();        // Quitar espacios / Remove whitespace
+  cmd.toLowerCase(); // Todo a minúsculas para facilitar comparación / To lowercase for easier comparison
+
+  // --- COMANDOS DE DIRECCIÓN / DIRECTION COMMANDS ---
+  
+  if (cmd == "fw" || cmd == "f") {
+    setMovementState(true, false, false, false); // Solo FWD / Only FWD
+    Serial.println(F(">> AVANZANDO / MOVING FORWARD"));
+  }
+  else if (cmd == "bw" || cmd == "b") {
+    setMovementState(false, true, false, false); // Solo BWD / Only BWD
+    Serial.println(F(">> RETROCEDIENDO / MOVING BACKWARD"));
+  }
+  else if (cmd == "l" || cmd == "left") {
+    // IMPORTANTE: Si ya nos movemos, conservamos el movimiento y añadimos giro
+    // IMPORTANT: If already moving, keep movement and add turn
+    
+    // Si estamos parados, solo giramos (spin)
+    // If stopped, only spin
+    if (isMovingForward || isMovingBackward) {
+      isTurningLeft = true; isTurningRight = false;
+      Serial.println(F(">> GIRANDO IZQ (En marcha) / TURNING LEFT (Moving)"));
+    } else {
+      setMovementState(false, false, true, false); // Spin Izquierda / Left Spin
+      Serial.println(F(">> ROTANDO IZQ (Eje) / ROTATING LEFT (Axis)"));
+    }
+  }
+  else if (cmd == "r" || cmd == "right") {
+    if (isMovingForward || isMovingBackward) {
+      isTurningRight = true; isTurningLeft = false;
+      Serial.println(F(">> GIRANDO DER (En marcha) / TURNING RIGHT (Moving)"));
+    } else {
+      setMovementState(false, false, false, true); // Spin Derecha / Right Spin
+      Serial.println(F(">> ROTANDO DER (Eje) / ROTATING RIGHT (Axis)"));
+    }
+  }
+  else if (cmd == "s" || cmd == "stop") {
+    forceStop();
+    Serial.println(F(">> STOP"));
+  }
+  
+  // --- COMANDO DE VELOCIDAD / SPEED COMMAND ---
+  else if (cmd.startsWith("v")) {
+    String valStr = cmd.substring(1); // Coger el numero después de 'v' / Get number after 'v'
+    int newVal = valStr.toInt();
+    motorSpeed = constrain(newVal, 0, 255); // Seguridad / Safety
+    Serial.print(F(">> VELOCIDAD AJUSTADA / SPEED ADJUSTED: ")); Serial.println(motorSpeed);
+    
+    // Si el coche ya se mueve, actualizamos la velocidad al vuelo
+    // If car is already moving, update speed on the fly
+    executeMovement(); 
+  }
+}
+
+// Helper para establecer estados limpiamente
+// Helper to set states cleanly
+void setMovementState(bool f, bool b, bool l, bool r) {
+  isMovingForward = f;
+  isMovingBackward = b;
+  isTurningLeft = l;
+  isTurningRight = r;
+}
+
+void forceStop() {
+  setMovementState(false, false, false, false);
+  stopMotors();
+}
+
+// ---------------- EJECUTOR DE MOVIMIENTO (OUTPUT) / MOVEMENT EXECUTOR (OUTPUT) ----------------
+
+void executeMovement() {
+  // Prioridad 1: Giros en movimiento (Curvas suaves)
+  // Priority 1: Moving turns (Smooth curves)
+  if (isMovingForward && isTurningLeft)       turnLeftForward();
+  else if (isMovingForward && isTurningRight) turnRightForward();
+  else if (isMovingBackward && isTurningLeft) turnLeftBackward();
+  else if (isMovingBackward && isTurningRight) turnRightBackward();
+  
+  // Prioridad 2: Movimiento recto
+  // Priority 2: Straight movement
+  else if (isMovingForward)  moveForward();
+  else if (isMovingBackward) moveBackward();
+  
+  // Prioridad 3: Giros sobre el eje (Spin) - Solo si NO hay movimiento F/B
+  // Priority 3: Spin on axis - Only if NO F/B movement
+  else if (isTurningLeft)  turnLeftSpin();
+  else if (isTurningRight) turnRightSpin();
+  
+  // Default: Parar si no hay flags
+  // Default: Stop if no flags
+  else stopMotors();
+}
+
+// ---------------- DRIVER MOTOR (Nivel Bajo) / MOTOR DRIVER (Low Level) ----------------
+
+void moveForward() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); analogWrite(ENA, motorSpeed);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); analogWrite(ENB, motorSpeed);
+}
+
+void moveBackward() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); analogWrite(ENA, motorSpeed);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); analogWrite(ENB, motorSpeed);
+}
+
+// Giro sobre propio eje (Tank Turn)
+// Spin on own axis (Tank Turn)
+void turnLeftSpin() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); analogWrite(ENA, motorSpeed);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); analogWrite(ENB, motorSpeed);
+}
+
+void turnRightSpin() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); analogWrite(ENA, motorSpeed);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); analogWrite(ENB, motorSpeed);
+}
+
+// Giros Suaves (Una rueda más lenta que la otra)
+// Smooth Turns (One wheel slower than the other)
+void turnLeftForward() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); analogWrite(ENA, motorSpeed * 0.4); // Rueda interior lenta / Inner wheel slow
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); analogWrite(ENB, motorSpeed);       // Rueda exterior rápida / Outer wheel fast
+}
+
+void turnRightForward() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); analogWrite(ENA, motorSpeed);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); analogWrite(ENB, motorSpeed * 0.4);
+}
+
+void turnLeftBackward() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); analogWrite(ENA, motorSpeed * 0.4);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); analogWrite(ENB, motorSpeed);
+}
+
+void turnRightBackward() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); analogWrite(ENA, motorSpeed);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); analogWrite(ENB, motorSpeed * 0.4);
+}
+
+void stopMotors() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); analogWrite(ENA, 0);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW); analogWrite(ENB, 0);
+}
