@@ -1,0 +1,75 @@
+#include <Servo.h>
+
+const int SERVO_PIN = 2;
+const int TRIG_PIN  = 3;
+const int ECHO_PIN  = 4;
+
+Servo scanServo;
+
+// Sweep limits (safe range)
+const int SERVO_MIN = 45;    // degrees (CHANGED: no hard left)
+const int SERVO_MAX = 135;   // degrees (CHANGED: no hard right)
+const int SERVO_STEP = 5;    // degrees per step (slow)
+const int SERVO_DELAY = 150; // ms between steps (smooth & calm)
+
+long readDistanceCM() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30 ms timeout
+  if (duration == 0) return -1;  // no echo
+
+  return duration * 0.034 / 2;
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  scanServo.attach(SERVO_PIN);
+  scanServo.write(90);  // start centered
+
+  Serial.println("Servo + Ultrasonic test started");
+  delay(1000);
+}
+
+void loop() {
+  // Sweep left → right
+  for (int angle = SERVO_MIN; angle <= SERVO_MAX; angle += SERVO_STEP) {
+    scanServo.write(angle);
+    delay(SERVO_DELAY);
+
+    long dist = readDistanceCM();
+
+    Serial.print("Angle: ");
+    Serial.print(angle);
+    Serial.print(" deg  |  Distance: ");
+    if (dist < 0) Serial.println("No echo");
+    else {
+      Serial.print(dist);
+      Serial.println(" cm");
+    }
+  }
+
+  // Sweep right → left
+  for (int angle = SERVO_MAX; angle >= SERVO_MIN; angle -= SERVO_STEP) {
+    scanServo.write(angle);
+    delay(SERVO_DELAY);
+
+    long dist = readDistanceCM();
+
+    Serial.print("Angle: ");
+    Serial.print(angle);
+    Serial.print(" deg  |  Distance: ");
+    if (dist < 0) Serial.println("No echo");
+    else {
+      Serial.print(dist);
+      Serial.println(" cm");
+    }
+  }
+}
