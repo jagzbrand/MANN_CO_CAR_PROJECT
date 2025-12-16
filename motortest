@@ -1,0 +1,105 @@
+// ===== L298N MOTOR TEST — FINAL PINOUT =====
+
+// Confirmed wiring
+const int ENA = 5;
+const int IN1 = 7;
+const int IN2 = 8;
+const int IN3 = 11;
+const int IN4 = 12;
+const int ENB = 6;
+
+const int SPEED = 200; // 0–255 (start a bit lower than full)
+
+void setup() {
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  stopMotors();
+}
+
+void loop() {
+  forward();
+  delay(2000);
+  stopMotors();
+  delay(1000);
+
+  backward();
+  delay(2000);
+  stopMotors();
+  delay(1000);
+
+  turnLeft();
+  delay(2000);
+  stopMotors();
+  delay(1000);
+
+  turnRight();
+  delay(2000);
+  stopMotors();
+  delay(2000);
+}
+
+// ---------- MOTION FUNCTIONS ----------
+
+void setSpeed(int spd) {
+  analogWrite(ENA, spd);
+  analogWrite(ENB, spd);
+}
+
+void forward() {
+  setSpeed(SPEED);
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void backward() {
+  setSpeed(SPEED);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void turnLeft() {
+  setSpeed(SPEED);
+
+  // Left side backward
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  // Right side forward
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void turnRight() {
+  setSpeed(SPEED);
+
+  // Left side forward
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  // Right side backward
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void stopMotors() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
